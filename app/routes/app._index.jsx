@@ -316,7 +316,7 @@ const promises = Object.entries(grouped).map(
       result?.data?.productVariantsBulkUpdate?.userErrors || [];
 
     if (userErrors.length) {
-      throw new Error(userErrors.map((e) => e.message).join(", "));
+      console.error("Variant update error:", userErrors);
     }
   }
 );
