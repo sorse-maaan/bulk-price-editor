@@ -231,18 +231,19 @@ export async function action({ request }) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function safeRequest(fn, retries = 3) {
+async function safeRequest(fn, retries = 5, delay = 1500) {
   try {
     return await fn();
   } catch (e) {
-    if (e.message?.includes("Throttled") && retries > 0) {
-      await sleep(1000);
-      return safeRequest(fn, retries - 1);
+    const msg = String(e?.message || e || "");
+    if (msg.includes("Throttled") && retries > 0) {
+      await sleep(delay);
+      return safeRequest(fn, retries - 1, delay * 1.5);
     }
     throw e;
   }
 }
-  
+
   const { admin } = await authenticate.admin(request);
 
   const formData = await request.formData();
@@ -294,56 +295,65 @@ async function safeRequest(fn, retries = 3) {
   }
 
   const grouped = groupVariantsByProduct(variantsToUpdate);
+const entries = Object.entries(grouped);
 
-const promises = Object.entries(grouped).map(
-  async ([productId, variants]) => {
-    const variantInputs = variants.map((v) => {
-      const basePrice = parseFloat(v.price);
-      const newPrice = (basePrice * multiplier).toFixed(2);
-      const compareAtPrice = (parseFloat(newPrice) * 1.1).toFixed(2);
+const chunkSize = 5; // можна 3, якщо ще душить
+for (let i = 0; i < entries.length; i += chunkSize) {
+  const chunk = entries.slice(i, i + chunkSize);
 
-      return {
-        id: v.variantId,
-        price: newPrice,
-        compareAtPrice,
-      };
-    });
+  await Promise.all(
+    chunk.map(async ([productId, variants]) => {
+      const variantInputs = variants.map((v) => {
+        const basePrice = parseFloat(v.price);
+        const newPrice = (basePrice * multiplier).toFixed(2);
+        const compareAtPrice = (parseFloat(newPrice) * 1.1).toFixed(2);
 
-    const response = await admin.graphql(
-      `
-        mutation UpdateVariants($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-          productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-            userErrors {
-              field
-              message
+        return {
+          id: v.variantId,
+          price: newPrice,
+          compareAtPrice,
+        };
+      });
+
+      const response = await safeRequest(() =>
+        admin.graphql(
+          `
+            mutation UpdateVariants($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+              productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+                userErrors {
+                  field
+                  message
+                }
+              }
             }
-          }
-        }
-      `,
-      {
-        variables: {
-          productId,
-          variants: variantInputs,
-        },
-      },
-    );
+          `,
+          {
+            variables: {
+              productId,
+              variants: variantInputs,
+            },
+          },
+        )
+      );
 
-    const result = await response.json();
-    const userErrors =
-      result?.data?.productVariantsBulkUpdate?.userErrors || [];
+      const result = await response.json();
+      const userErrors =
+        result?.data?.productVariantsBulkUpdate?.userErrors || [];
 
-    if (userErrors.length) {
-      console.error("Variant update error:", userErrors);
-    }
-  }
-);
+      if (userErrors.length) {
+        console.error("Variant update error:", productId, userErrors);
+        throw new Error(
+          `Update failed for product ${productId}: ${userErrors.map(e => e.message).join(", ")}`
+        );
+      }
+    })
+  );
 
-for (const variant of variants) {
-  await safeRequest(() => updateVariant(variant));
-  await sleep(300); // можна 200–500
+  await sleep(1500); // якщо ще є throttled, підніми до 1000–1500
 }
 
 return Response.json({ success: true, timestamp: Date.now() });
+
 }
 
 // --------------------
