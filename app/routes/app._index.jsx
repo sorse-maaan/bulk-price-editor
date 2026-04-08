@@ -226,6 +226,23 @@ export async function loader({ request }) {
 // ACTION
 // --------------------
 export async function action({ request }) {
+
+  function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function safeRequest(fn, retries = 3) {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e.message?.includes("Throttled") && retries > 0) {
+      await sleep(1000);
+      return safeRequest(fn, retries - 1);
+    }
+    throw e;
+  }
+}
+  
   const { admin } = await authenticate.admin(request);
 
   const formData = await request.formData();
@@ -321,7 +338,10 @@ const promises = Object.entries(grouped).map(
   }
 );
 
-await Promise.all(promises);
+for (const variant of variants) {
+  await safeRequest(() => updateVariant(variant));
+  await sleep(300); // можна 200–500
+}
 
 return Response.json({ success: true, timestamp: Date.now() });
 }
