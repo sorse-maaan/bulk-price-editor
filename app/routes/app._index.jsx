@@ -249,6 +249,7 @@ async function safeRequest(fn, retries = 5, delay = 1500) {
   const formData = await request.formData();
 
   const percent = parseFloat(formData.get("percent")) || 0;
+  const comparePercent = parseFloat(formData.get("comparePercent")) || 0;
   const mode = formData.get("mode");
   const target = formData.get("target");
   const collectionIds = JSON.parse(formData.get("collectionIds") || "[]");
@@ -306,7 +307,9 @@ for (let i = 0; i < entries.length; i += chunkSize) {
       const variantInputs = variants.map((v) => {
         const basePrice = parseFloat(v.price);
         const newPrice = (basePrice * multiplier).toFixed(2);
-        const compareAtPrice = (parseFloat(newPrice) * 1.1).toFixed(2);
+        const compareAtPrice = (
+  parseFloat(newPrice) * (1 + comparePercent / 100)
+).toFixed(2);
 
         return {
           id: v.variantId,
@@ -368,15 +371,16 @@ export default function Index() {
   const [selectedCollectionIds, setSelectedCollectionIds] = useState([]);
   const [selectedProductIds, setSelectedProductIds] = useState([]);
   const navigation = useNavigation();
-const isLoading = navigation.state === "submitting";
-const actionData = useActionData();
-const [toast, setToast] = useState(null);
-const [searchValue, setSearchValue] = useState("");
-const [options, setOptions] = useState([]);
-const [loadingSearch, setLoadingSearch] = useState(false);
-const submit = useSubmit();
+  const isLoading = navigation.state === "submitting";
+  const actionData = useActionData();
+  const [toast, setToast] = useState(null);
+  const [searchValue, setSearchValue] = useState("");
+  const [options, setOptions] = useState([]);
+  const [loadingSearch, setLoadingSearch] = useState(false);
+  const submit = useSubmit();
+  const [comparePercent, setComparePercent] = useState("10");
 
-const handleSelectProduct = (selected) => {
+  const handleSelectProduct = (selected) => {
   const lastSelected = selected[selected.length - 1];
 
   if (selectedProductIds.includes(lastSelected)) {
@@ -643,9 +647,13 @@ const dismissToast = () => setToast(null);
                       autoComplete="off"
                     />
 
-                    <Text as="p" tone="subdued">
-                      Compare-at price will always be 10% higher than the final price.
-                    </Text>
+                    <TextField
+  label="Compare-at price (%)"
+  type="text"
+  value={comparePercent}
+  onChange={setComparePercent}
+  autoComplete="off"
+/>
 
                     <Text as="p" tone="subdued">
   You are about to {mode[0]} prices by {percent || 0}%
@@ -658,6 +666,7 @@ const dismissToast = () => setToast(null);
 
     formData.append("variants", JSON.stringify(products));
     formData.append("percent", percent);
+    formData.append("comparePercent", comparePercent);
     formData.append("mode", mode[0]);
     formData.append("target", target[0]);
     formData.append("collectionIds", JSON.stringify(selectedCollectionIds));
